@@ -1,0 +1,620 @@
+---
+title: "Explore the Associations of Income and Education Levels with Dietary Intakes"
+author: "Yu Huaqin"
+output:
+  html_document: default
+  pdf_document: default
+always_allow_html: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+```
+
+## Introduction
+
+Dietary habits could be influenced by many factors, such as personal preferences, cultural rituals, age and etc. It is also associated with one’s social and economic status. In particular, many studies have shown that income and educational levels play a large part in influencing dietary intakes. Low income is often associated with a poor quality dietary intake. Some researchers suggested that people with lower education levels may consume larger amounts of unhealthy, calorically dense food than those with a higher education level, possibly because they are more likely to be engaged in jobs that require physical activities. While people with better education backgrounds and higher income tend to adopt healthier food choices. In this research, I will examine whether this trend is applicable in the context of the UK, based on various estimators of dietary intake from Tesco Grocery 1.0 dataset.
+
+
+```{r warning=FALSE}
+library(tidyverse)
+library(caret)
+theme_set(theme_minimal())
+library(ggrepel)
+library(sf)
+library(tmap)
+library(scales)
+library(viridis)
+library(gridExtra)
+library(dbplyr)
+```
+
+## Composition of healthy diets
+World Health Organization (WHO) reported that a healthy diet helps to protect against malnutrition and noncommunicable diseases (NCDs), while unhealthy diet and lack of physical activity are leading global risks to health. It also recommend to limit the relative energy supply from each nutrient within certain ranges (ranges of population nutrient intake goals):
+*Fat: 15-30% of total energy intake
+*Saturated fats: <10% 
+*Carbohydrates: 55-75%
+*Sugar: <10% 
+*Protein: 10-15%
+*Salt: <5 g per day  
+*Fruits and vegetables: >=400 g per day
+
+
+```{r}
+tesco_LSOA <- read_csv("Area-level grocery purchases/year_lsoa_grocery.csv")
+head(tesco_LSOA)
+```
+
+To get an overview of the UK’s overall energy intake compositions, frequency distribution of fractions of energy intake from 5 main nutrients(fat, saturated fat, carbohydrates, sugar and protein)of small areas(LSOA level) is plotted against respective WHO recommended ranges in the following plots(shown as blue areas). 
+
+```{r}
+p_fat <- ggplot(data= tesco_LSOA, mapping = aes(x = f_energy_fat))+
+  geom_histogram(fill = 'sienna2', bins=60)+
+  geom_rect(mapping=aes(xmin=0.15, xmax=0.3, ymin=0, ymax=2000),
+            fill= 'lightsteelblue', alpha = 0.01)+
+  xlim(0,0.6)+ylim(0,2000)+
+  labs(x = "Fraction of Energy from Fat",
+       y = "Count",
+       caption = "Data: Tesco Grocery 1.0")
+```
+
+```{r}
+p_sat <- ggplot(data= tesco_LSOA, mapping = aes(x = f_energy_saturate)) +
+  geom_histogram(fill = 'tomato3', bins=60)+
+  geom_rect(mapping=aes(xmin=0, xmax=0.1, ymin=0, ymax=2000),
+            fill= 'lightsteelblue', alpha = 0.01)+
+  xlim(0,0.6)+ylim(0,2000)+
+  labs(x = "Fraction of Energy from Saturated Fat",
+       y = "",
+       caption = "Data: Tesco Grocery 1.0")
+```
+
+```{r fig.width= 10, fig.height=5}
+grid.arrange(p_fat,p_sat, ncol =2, 
+             top = "Frequency Distributions of Fractions of Energy from Fat and Saturated Fat")
+```
+Fat and saturated fats: From this plot, we can conclude that relative energy intake from both fat and saturated fat for almost the entire population in the UK is above the healthy range. The fractions of energy from fat mostly fall in the range of 40-50%, greatly deviated from the recommended maximum level of 30%.
+```{r}
+p_sugar <- ggplot(data= tesco_LSOA, mapping = aes(x = f_energy_sugar)) + 
+  geom_histogram(fill = 'maroon', bins = 60)+
+  geom_rect(mapping=aes(xmin=0, xmax=0.1, ymin=0, ymax=1500),
+            fill= 'lightsteelblue', alpha = 0.01)+
+  xlim(0,0.6)+ylim(0,1500)+
+  labs(x = "Fraction of Energy from Sugar",
+       y = "Count",
+       caption = "Data: Tesco Grocery 1.0")
+```
+
+```{r}
+p_carb <- ggplot(data= tesco_LSOA, mapping = aes(x = f_energy_carb))+ 
+  geom_histogram(fill = 'plum',bins=60)+
+  geom_rect(mapping=aes(xmin=0.55, xmax=0.75, ymin=0, ymax=1500),
+            fill= 'lightsteelblue', alpha = 0.01)+
+  xlim(0,0.8)+ylim(0,1500)+
+  labs(x = "Fraction of Energy from Carbs",
+       y = "Count",
+       caption = "Data: Tesco Grocery 1.0")
+```
+
+```{r fig.width= 10, fig.height=5}
+grid.arrange(p_carb,p_sugar, ncol =2, 
+             top = "Frequency Distributions of Fractions of Energy from Carbohydrates and Suagr")
+```
+Carbohydrate and sugar: Relative energy intake from carbohydrate is below the recommended level for almost the entire population. In contrast, the fraction of energy intake from sugar is beyond the healthy range. 
+
+```{r}
+p_protein <- ggplot(data= tesco_LSOA, mapping = aes(x = f_energy_protein))+ 
+  geom_rect(mapping=aes(xmin=0.1, xmax=0.15, ymin=0, ymax=1500),
+            fill= 'lightsteelblue', alpha = 0.01)+
+  geom_histogram(fill = 'slateblue', bins= 60)+
+
+  xlim(0,0.25)+ylim(0,1500)+
+  labs(x = "Fraction of Energy from Protein",
+       y = "Count",
+       caption = "Data: Tesco Grocery 1.0",
+       title = "Energy from Protein Distribution")+
+  theme(plot.title = element_text(hjust = 0.5))
+
+p_protein
+```
+Protein: Relative energy intake of protein falls within the recommended range to a large extent. Small portion of the cases is below the recommended minimum level of 10%.
+
+Key findings from the above plots:
+* Estimated fat and sugar consumptions are both above the healthy levels for almost the entire population in the investigated areas in the UK. 
+* Relative energy supply from carbohydrate mostly below recommended level, could be due to: low-carb food consumption or high energy intake from other nutrients like fat and sugar.  
+* This implies an overall unhealthy dietary composition in terms of energy supply.
+
+
+
+Geographical data from www.london.gov.uk
+```{r}
+head(tesco_LSOA)
+```
+
+
+Clean data
+```{r}
+tesco_LSOA_selected <-
+  tesco_LSOA %>%
+  dplyr::select(area_id, weight,fat,carb,
+                f_energy_fat,f_energy_saturate, 
+                f_energy_sugar, f_energy_carb,f_energy_protein, 
+                fibre, alcohol, 
+                f_fruit_veg, f_grains,f_beer,f_wine, 
+                num_transactions,population, 
+                male, female, 
+                age_0_17, age_18_64, "age_65+" )
+head(tesco_LSOA_selected)
+```
+
+Calculations
+```{r}
+tesco_LSOA_calculated<-
+  tesco_LSOA_selected%>%
+  mutate(energy_fat_dev = case_when(
+    f_energy_fat > 0.3 ~ f_energy_fat - 0.3,
+    (f_energy_fat >= 0.1 & f_energy_fat <=0.3) ~ 0
+    ))%>%
+
+  mutate(energy_saturate_dev = f_energy_saturate - 0.1) %>%
+
+  mutate(energy_sugar_dev = f_energy_sugar - 0.1)%>%
+  mutate(f_fibre = fibre/weight)%>%
+  mutate(p_female = female/population)%>%
+  mutate(p_young = age_0_17/population)%>%
+  mutate(p_elderly = `age_65+`/population)
+
+head(tesco_LSOA_calculated)
+```
+
+Population indicators data: www.london.gov.uk
+```{r}
+population_scores <- read_csv("File_7_ID_2015_All_ranks__deciles_and_scores_for_the_Indices_of_Deprivation__and_population_denominators.csv")
+colnames(population_scores)[1] <-'area_id'
+head(population_scores)
+```
+
+Map data
+```{r}
+LSOA <- read_sf("statistical-gis-boundaries-london/ESRI/LSOA_2011_London_gen_MHW.shp")
+colnames(LSOA)[1] <-'area_id'
+
+```
+
+
+Merge tesco data to spatial data
+```{r}
+tesco_LSOA_spatial <-
+left_join(LSOA,tesco_LSOA_calculated, by = 'area_id')
+
+population_scores_spatial <- 
+left_join(LSOA, population_scores, by = 'area_id')
+
+head(tesco_LSOA_spatial)
+```
+
+## Spatial distribution of dietary intakes 
+# - comparing with distribution of income and education levels 
+
+Income and education levels are mapped at LSOA level according to a 2015 demographic data from GOV.UK. “Income decile” and “Education, skills and training decile” categorize the population into 10 groups respectively according to income and education levels. 1 indicates the lowest level of income/education while 10 indicates the highest.
+From the maps, it is observed that areas with higher education deciles tend to have higher income deciles. 
+
+```{r fig.height=5, fig.width=12}
+income <- tm_shape(population_scores_spatial)+
+  tm_polygons('Income Decile (where 1 is most deprived 10% of LSOAs)',
+              border.alpha = 0, 
+              n = 10,
+              palette = "Blues",
+              title = "Income Decile")+
+  
+  
+  tm_layout(main.title = 'Income Decile \n(where 1 is most deprived 10% of LSOAs)',
+            main.title.size = 1.2)
+edu<-tm_shape(population_scores_spatial)+
+  tm_polygons('Education, Skills and Training Decile (where 1 is most deprived 10% of LSOAs)',
+              border.alpha = 0,
+              palette = "Blues",
+              n = 10,
+              title = "Education, skills \n& training  Decile")+
+  tm_layout(main.title = 'Education, Skills and Training Decile \n(where 1 is most deprived 10% of LSOAs)',
+            main.title.size = 1.2)
+
+tmap_arrange(income, edu)
+```
+
+
+
+```{r fig.height=5, fig.width=12}
+fat_dev<- tm_shape(tesco_LSOA_spatial)+
+  tm_polygons('energy_fat_dev', border.alpha = 0,n = 6, title = "Deviation"  )+
+
+  tm_layout(main.title = "Fraction of Energy intake from Fat \nDeviation from WHO Recommended Level",
+            main.title.size = 1.2)
+sugar_dev<- tm_shape(tesco_LSOA_spatial)+
+  tm_polygons('energy_sugar_dev', border.alpha = 0,n = 6, title = "Deviation"  )+
+
+  tm_layout(main.title = "Fraction of Energy intake from Sugar \nDeviation from WHO Recommended Level",
+            main.title.size = 1.2)
+
+tmap_arrange(fat_dev,sugar_dev)
+```
+This plot examines how the relative energy intakes from fat and sugar deviate from their recommended levels across different areas of the UK(at LSOA level). The excessive energy intake from fat seems to deviate more towards central areas. Sugar consumption seems to be higher in the peripherals. Comparing these two maps with income and education level distribution maps, there are hardly any obvious associations observed. 
+
+```{r fig.height=5, fig.width=12}
+p_fibre<- tm_shape(tesco_LSOA_spatial)+
+  tm_polygons('f_fibre', border.alpha = 0,
+              n = 10, 
+              title = " ", 
+              palette = "YlGn")+
+  tm_layout(main.title = "Fraction of Weight of Fibre",
+            main.title.size = 1.5)
+
+p_fruit_veg<- tm_shape(tesco_LSOA_spatial)+
+  tm_polygons('f_fruit_veg', border.alpha = 0,
+              n = 10, 
+              title = " ", 
+              palette = "YlGn" )+
+  tm_layout(main.title = "Fraction of Fruit and Vegetable",
+            main.title.size = 1.5)
+ tmap_arrange(p_fibre, p_fruit_veg)
+```
+These two maps are indicative of distributions of relative fibre and fruit/vegetable consumptions. Comparing with income and education level distribution maps, it can be observed that:
+*areas with higher estimated relative consumption of fibre have higher income deciles;
+*areas with higher estimated relative fruit/vegetable consumption have higher income and education decicles.
+
+
+## Relationship between income & education level and selected dietary patterns  
+The following plots explore the extents to which income & education levels affect the dietary patterns. Here are four selected patterns to be analysed:
+* Unhealthy diet pattern with high-sugar and high-fat 
+* Healthy diet pattern with high protein, fruit and vegetable 
+* Healthy diet pattern with low-carb and high-fibre
+* Beer vs Wine
+(The dashed lines represent median values)
+```{r }
+correlation_dataset <- 
+  tesco_LSOA_calculated%>%
+  left_join(population_scores, key = "area_id")%>%
+  mutate(income_decile = case_when(
+    `Income Decile (where 1 is most deprived 10% of LSOAs)` <=2 ~ "1-2", 
+    `Income Decile (where 1 is most deprived 10% of LSOAs)` >2 & 
+      `Income Decile (where 1 is most deprived 10% of LSOAs)` <=4 ~ "3-4", 
+    `Income Decile (where 1 is most deprived 10% of LSOAs)` >4 & 
+      `Income Decile (where 1 is most deprived 10% of LSOAs)` <=6 ~ "5-6", 
+    `Income Decile (where 1 is most deprived 10% of LSOAs)` >6 & 
+      `Income Decile (where 1 is most deprived 10% of LSOAs)` <=8 ~ "7-8", 
+    `Income Decile (where 1 is most deprived 10% of LSOAs)` >8 & 
+      `Income Decile (where 1 is most deprived 10% of LSOAs)` <=10 ~ "9-10"
+  ))%>%
+  mutate(edu_decile = case_when(
+    `Education, Skills and Training Decile (where 1 is most deprived 10% of LSOAs)` <=2 ~ "1-2", 
+    `Education, Skills and Training Decile (where 1 is most deprived 10% of LSOAs)` >2 & 
+      `Education, Skills and Training Decile (where 1 is most deprived 10% of LSOAs)` <=4 ~ "3-4", 
+    `Education, Skills and Training Decile (where 1 is most deprived 10% of LSOAs)` >4 & 
+      `Education, Skills and Training Decile (where 1 is most deprived 10% of LSOAs)` <=6 ~ "5-6", 
+    `Education, Skills and Training Decile (where 1 is most deprived 10% of LSOAs)` >6 & 
+      `Education, Skills and Training Decile (where 1 is most deprived 10% of LSOAs)` <=8 ~ "7-8", 
+    `Education, Skills and Training Decile (where 1 is most deprived 10% of LSOAs)` >8 & 
+      `Education, Skills and Training Decile (where 1 is most deprived 10% of LSOAs)` <=10 ~ "9-10"
+  ))  
+  
+
+head(correlation_dataset)
+
+```
+
+```{r fig.height=6, fig.width=15}
+p <- ggplot(data = correlation_dataset, mapping = aes(x = energy_fat_dev, 
+                                                      y= energy_sugar_dev,  
+                                                      color = income_decile) ) 
+p_income_unhealthy <- 
+  p+geom_point(alpha = 0.8)+
+  labs(y = "Fraction of Energy from Sugar",
+       x = "Fraction of Energy from Fat")+
+  
+  geom_hline(yintercept = median(correlation_dataset$energy_sugar_dev),
+             linetype="dashed", 
+             color = "blue")+
+  geom_vline(xintercept = median(correlation_dataset$energy_fat_dev),
+             linetype="dashed", 
+             color = "darkgreen")+
+  
+  scale_color_brewer(name = "Income Decile",
+                     palette= "RdYlBu")
+
+p <- ggplot(data = correlation_dataset, mapping = aes(x = energy_fat_dev, 
+                                                      y= energy_sugar_dev,  
+                                                      color = edu_decile) ) 
+p_edu_unhealthy<-
+  p+geom_point(alpha = 0.8)+
+  labs(y = "Fraction of Energy from Sugar",
+       x = "Fraction of Energy from Fat")+
+  
+  geom_hline(yintercept = median(correlation_dataset$energy_sugar_dev),
+             linetype="dashed", 
+             color = "blue")+
+  geom_vline(xintercept = median(correlation_dataset$energy_fat_dev),
+             linetype="dashed", 
+             color = "darkgreen")+
+  
+  scale_color_brewer(name = "Education, skills\n&training Decile",
+                     palette= "RdYlBu")
+
+grid.arrange(p_income_unhealthy,p_edu_unhealthy, ncol = 2,
+             top = "Excessive Fraction of Energy Intake from Fat and Sugar 
+-Distribution among Income and Education level groups")
+```
+# Unhealthy diet pattern with high-sugar and high-fat 
+From these plots, lower income and education groups tend to consume less fat and more sugar than higher income and education groups. The distribution by education level is more polarized, implying education level has more influence than income level on sugar and fat consumption. 
+
+
+```{r fig.height=6, fig.width=15}
+p <- ggplot(data = correlation_dataset, mapping = aes(x = f_fruit_veg, 
+                                                      y= f_energy_protein,  
+                                                      color = income_decile) ) 
+p_income_fruit_protein <- 
+  p+geom_point(alpha = 0.8)+
+  labs(y = "Energy intake from Protein",
+       x = "Fraction of Fruits and Vegetables",
+       title =  )+
+  
+  geom_hline(yintercept = median(correlation_dataset$f_energy_protein),
+             linetype="dashed", 
+             color = "blue")+
+  geom_vline(xintercept = median(correlation_dataset$f_fruit_veg),
+             linetype="dashed", 
+             color = "darkgreen")+
+  
+  scale_color_brewer(name = "Income Decile",
+                     palette= "RdYlBu")
+
+p <- ggplot(data = correlation_dataset, mapping = aes(x = f_fruit_veg, 
+                                                      y= f_energy_protein,  
+                                                      color = edu_decile) ) 
+p_edu_fruit_protein<-
+  p+geom_point(alpha = 0.8)+
+  labs(y = "Energy intake from Protein",
+       x = "Fraction of Fruits and Vegetables")+
+  
+  geom_hline(yintercept = median(correlation_dataset$f_energy_protein),
+             linetype="dashed", 
+             color = "blue")+
+  geom_vline(xintercept = median(correlation_dataset$f_fruit_veg),
+             linetype="dashed", 
+             color = "darkgreen")+
+  
+  scale_color_brewer(name = "Education, skills\n&training Decile",
+                     palette= "RdYlBu")
+
+grid.arrange(p_income_fruit_protein,p_edu_fruit_protein, ncol = 2,
+             top = "Healthy Nutrients Intakes 
+-Distribution among Income and Education level groups"
+             )
+```
+# Healthy diet pattern with high protein, fruit and vegetable 
+Lower income and lower education groups consume less protein and fruit/veg than those with higher income and higher education levels. The intake of these nutrients seems to be positively related to both income level and education level.
+
+
+
+```{r fig.height=6, fig.width=15}
+p <- ggplot(data = correlation_dataset, mapping = aes(x = f_energy_carb, 
+                                                      y= fibre,  
+                                                      color = income_decile) ) 
+p_income_carb_fibre<-p+geom_point(alpha = 0.8)+
+  labs(x = "Energy intake from Carbohydrates",
+       y = "Fibre")+
+  scale_color_brewer(name = "Income Decile",
+                     palette= "RdYlBu")+
+  geom_hline(yintercept = median(correlation_dataset$fibre),
+             linetype="dashed", 
+             color = "darkgreen")+
+  geom_vline(xintercept = median(correlation_dataset$f_energy_carb),
+             linetype="dashed", 
+             color = "red")+
+  xlim(0.3,0.55)+
+  ylim(1,2.5)
+
+p <- ggplot(data = correlation_dataset, mapping = aes(x = f_energy_carb, 
+                                                      y= fibre,  
+                                                      color = edu_decile) ) 
+p_edu_carb_fibre<-p+geom_point(alpha = 0.8)+
+  labs(x = "Energy intake from Carbohydrates",
+       y = "Fibre")+
+  scale_color_brewer(name = "Education, skills\n&training Decile",
+                     palette= "RdYlBu")+
+  geom_hline(yintercept = median(correlation_dataset$fibre),
+             linetype="dashed", 
+             color = "darkgreen")+
+  geom_vline(xintercept = median(correlation_dataset$f_energy_carb),
+             linetype="dashed", 
+             color = "red")+
+  xlim(0.3,0.55)+
+  ylim(1,2.5)  
+
+grid.arrange(p_income_carb_fibre,p_edu_carb_fibre, ncol = 2,
+             top = "Carbohydrate VS Fibre 
+-Distribution among Income and Education level groups")
+```
+# Healthy diet pattern with low-carb and high-fibre
+From the distribution pattern, people with lower income and lower education levels tend to have higher relative energy intake from carbohydrates and lower consumption of fibre. This observation is in accordance with various findings by other researches. 
+
+
+
+```{r fig.height=6, fig.width=15}
+p <- ggplot(data = correlation_dataset, mapping = aes(x = f_beer, 
+                                                      y= f_wine,  
+                                                      color = income_decile) ) 
+p_income_alcohol<-p+geom_point(alpha = 0.5)+
+  labs(x = "Beer",
+       y = "Wine")+
+  scale_color_brewer(name = "Income Decile",
+                     palette= "RdYlBu")+
+  geom_hline(yintercept = median(correlation_dataset$f_wine),
+             linetype="dashed", 
+             color = "darkgreen")+
+  geom_vline(xintercept = median(correlation_dataset$f_beer),
+             linetype="dashed", 
+             color = "red")+
+      xlim(0,0.1)+
+  ylim(0,0.08)
+
+
+p <- ggplot(data = correlation_dataset, mapping = aes(x = f_beer, 
+                                                      y= f_wine,  
+                                                      color = edu_decile) ) 
+p_edu_alcohol<-p+geom_point(alpha = 0.5)+
+  labs(x = "Beer",
+       y = "Wine")+
+  scale_color_brewer(name = "Education, skills\n&training Decile",
+                     palette= "RdYlBu")+
+  geom_hline(yintercept = median(correlation_dataset$f_wine),
+             linetype="dashed", 
+             color = "darkgreen")+
+  geom_vline(xintercept = median(correlation_dataset$f_beer),
+             linetype="dashed", 
+             color = "red")+
+    xlim(0,0.1)+
+  ylim(0,0.08)
+  
+
+grid.arrange(p_income_alcohol,p_edu_alcohol, ncol = 2,
+             top = " Fraction of Beer and Wine intake
+-Distribution among Income and Education level groups")
+```
+# Beer vs Wine
+Wine could help rejuvenate the body, reducing risk of heart disease, high blood pressure, and diabetes. This is due to “polyphenols” in wines which are packed with antioxidants and potential health benefits. Therefore wine can be considered to be healthier than beer(assuming appropriate amount consumed). People with lower income and education levels tend to consume much less wine than those with higher income and education levels. Which could be because wines tend to be more expensive and only affordable by the more well-off people.
+
+
+
+```{r}
+colnames(correlation_dataset)[38] <-'Income Decile'
+colnames(correlation_dataset)[44] <-'Education Decile'
+head(correlation_dataset)
+```
+
+## Correlations between income & education levels and nutrient metrics
+
+```{r}
+
+correlation_table <- correlation_dataset %>%
+  dplyr::select(f_energy_fat, f_energy_sugar, f_energy_protein, 
+                carb, fibre, f_fruit_veg, 
+                'Income Decile', 'Education Decile')
+
+#correlation with Education levels
+Fat_1 <- (cor(correlation_dataset$f_energy_fat,correlation_dataset$`Education Decile`))
+Sugar_1 <- (cor(correlation_dataset$f_energy_sugar,correlation_dataset$`Education Decile` ))
+Protein_1 <- (cor(correlation_dataset$f_energy_protein,correlation_dataset$`Education Decile` ))
+Fruit_veg_1 <- (cor(correlation_dataset$f_fruit_veg,correlation_dataset$`Education Decile` ))
+Fibre_Carb_ratio_1 <-(cor((correlation_dataset$fibre/correlation_dataset$carb),correlation_dataset$`Education Decile` ) )
+
+#correlation with income levels
+Fat_2 <- (cor(correlation_dataset$f_energy_fat,correlation_dataset$`Income Decile`))
+Sugar_2 <- (cor(correlation_dataset$f_energy_sugar,correlation_dataset$`Income Decile` ))
+Protein_2 <- (cor(correlation_dataset$f_energy_protein,correlation_dataset$`Income Decile` ))
+Fruit_veg_2 <- (cor(correlation_dataset$f_fruit_veg,correlation_dataset$`Income Decile` ))
+Fibre_Carb_ratio_2 <-(cor((correlation_dataset$fibre/correlation_dataset$carb),correlation_dataset$`Income Decile` ) )
+
+cor_income_edu <- data.frame(Factor = c("Income Level", "Education, skills&training Level"),
+                             Fat = c(Fat_2,Fat_1),
+                             Sugar = c(Sugar_2, Sugar_1),
+                             Protein = c(Protein_2, Protein_1),
+                             Fruit_veg = c(Fruit_veg_2, Fruit_veg_1),
+                             Fibre_carb_ratio = c(Fibre_Carb_ratio_2, Fibre_Carb_ratio_1))
+p_cor <- cor_income_edu%>% gather(key = Nutrients, value = R, Fat:Fibre_carb_ratio)
+
+ggplot(data = p_cor, mapping = aes(x = Nutrients, y = R, fill = Factor))+
+  geom_col(position = "dodge")+
+  labs(title = "Correlation between Income and Education level with
+       various nutrients consumption estimators")
+
+```
+*Fat and sugar show very weak correlations with income levels.
+*Education levels show stronger correlations than income levels with every nutrient metrics. Education levels are more influential than income levels in affecting one’s dietary habits.  
+*Fibre_carb_ratio shows strongest correlations (R>0.6) with education levels among these 5 metrics.
+
+
+# Regression Model
+A regression model is built to predict fibre_carb_ratio with these factors:
+* Income decile
+* Education, skills & training decile
+* Percentage of female population
+* Percentage of children and youth (0-17)
+* Percentage of elderly (65+)
+
+```{r}
+model_data <-
+  correlation_dataset%>%
+  mutate(fibre_carb_ratio = fibre/carb)%>%
+  dplyr::select(p_female, p_young, p_elderly, 
+                `Income Decile`, `Education Decile`,
+                fibre_carb_ratio)
+
+head(model_data)
+```
+```{r, cache=TRUE}
+set.seed(123)
+# Creating a training dataset (80%)
+training_data <- createDataPartition(model_data$fibre_carb_ratio, p=0.80, list=FALSE)
+# Training data - select rows that are determined by createDataPartition()
+training_1 <- model_data[training_data,]
+# Select the remaining data for test (validation) data
+test_1 <- model_data[-training_data,]
+# Train the model
+m_1 <- train(fibre_carb_ratio ~ ., data=training_1, method="rf", importance=TRUE)
+```
+
+```{r}
+# Test the model
+predicted <- predict(m_1, test_1)
+```
+
+```{r}
+postResample(pred = predicted, obs = test_1$fibre_carb_ratio)
+```
+
+
+```{r fig.width= 8, fig.height=8}
+observed <- test_1$fibre_carb_ratio
+t<-data.frame(observed, predicted)
+p<-ggplot(data = t, mapping = aes(x = predicted, y = observed))
+p+ geom_point()+
+  ylim(0.07,0.12)+
+  xlim(0.07,0.12)+
+  geom_smooth()
+```
+Predicted vs Observed
+From this plot, predictions are not very accurate, with moderate deviations from the observed values. Nonetheless, there is still a general trend observed, implying that fibre/carbohydrate ratio is still related to and influenced by income and education levels to a moderate extent.
+
+## Conclusion
+Populations with lower income and education levels consume more carbohydrates and less fibres than those with higher income and education levels. Education levels influence dietary patterns to greater extents than income levels. However, fat and sugar consumptions do not seem to be influenced much by income and education levels in this context. Overall, the majority of the population in the UK are having unbalanced diets with excessive energy intake from fat and sugar. 
+
+## References
+
+Aiello, L.M., Schifanella, R., Quercia, D. et al. Large-scale and high-resolution analysis of food purchases and health outcomes. EPJ Data Sci. 8, 14 (2019). https://doi.org/10.1140/epjds/s13688-019-0191-y
+
+Amine E, Baba N, Belhadj M, Deurenbery-Yap M, Djazayery A, Forrester T, Galuska D, Herman S, James W, Mbuyamba J et al (1990) Diet, nutrition, and the prevention of chronic diseases. Report of a Joint WHO/FAO Expert Consultation 797
+
+French, S.A., Tangney, C.C., Crane, M.M. et al. Nutrition quality of food purchases varies by household income: the SHoPPER study. BMC Public Health 19, 231 (2019). https://doi.org/10.1186/s12889-019-6546-2
+
+Public Library of Science. (2013, November 6). Lower education levels linked to unhealthy diets. ScienceDaily. Retrieved April 3, 2020 from www.sciencedaily.com/releases/2013/11/131106202251.htm
+
+
+Healthy Diet. (WHO)
+https://www.who.int/news-room/fact-sheets/detail/healthy-diet
+
+Is beer better (or worse) for you than wine?
+https://www.bbc.com/future/article/20151026-is-beer-better-or-worse-for-you-than-wine
+
+
+# Data Sources
+
+LSOA-ATLAS
+https://data.london.gov.uk/dataset/lsoa-atlas
+
+National Statistics, English indices of deprivation 2015
+https://www.gov.uk/government/statistics/english-indices-of-deprivation-2015
+
+
+
+
